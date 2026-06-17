@@ -21,16 +21,6 @@ cp .env.example .env
 python app.py
 ```
 
-## Lab milestones
-
-| Milestone | Task | File |
-|---|---|---|
-| 1 | Label 20 training episodes | `data/my_labels.json` |
-| 2 | Implement the few-shot classifier | `classifier.py` |
-| 3 | Implement evaluation metrics | `evaluate.py` |
-
-See the lab instructions for full details.
-
 ## Project structure
 
 ```
