@@ -112,8 +112,7 @@ def classify_description(description: str) -> str:
         return (
             "<div style='background:#fef3c7;border-left:4px solid #f59e0b;padding:12px 16px;border-radius:0 8px 8px 0;'>"
             "<strong>⚠️ No labeled examples found.</strong><br>"
-            "Open <code>data/my_labels.json</code> and add at least one label before classifying. "
-            "See Milestone 1 in the lab instructions."
+            "Open <code>data/my_labels.json</code> and add at least one label before classifying."
             "</div>"
         )
 
@@ -130,8 +129,7 @@ def run_eval(max_per_class_val: int, use_all: bool, example_order: str) -> str:
     if not labeled_examples:
         return (
             "⚠️  No labeled examples found.\n\n"
-            "Complete Milestone 1 first: open data/my_labels.json and add labels "
-            "for the training episodes."
+            "Open data/my_labels.json and add labels for the training episodes."
         )
     max_per_class = None if use_all else int(max_per_class_val)
     config_note = []
@@ -172,13 +170,9 @@ with gr.Blocks(title="Pod Classifier") as demo:
     gr.Markdown(
         """
 # 🎙️ Pod Classifier
-**AI201 Lab 3 — Few-Shot Podcast Episode Classifier**
+**Few-Shot Podcast Episode Classifier**
 
 Classify podcast episode descriptions into four categories: **interview**, **solo**, **panel**, or **narrative**.
-Before the classifier works, you need to complete the milestones:
-- **Milestone 1:** Label the training episodes in `data/my_labels.json`
-- **Milestone 2:** Implement `build_few_shot_prompt()` and `classify_episode()` in `classifier.py`
-- **Milestone 3:** Implement `compute_accuracy()` and `compute_per_class_accuracy()` in `evaluate.py`
         """
     )
 
@@ -292,7 +286,7 @@ and see overall and per-class accuracy.
                 """
 ### Four-Label Taxonomy
 
-Use this guide when labeling `data/my_labels.json` in Milestone 1.
+Use this guide when labeling `data/my_labels.json`.
 
 ---
 
@@ -342,7 +336,7 @@ Evidence is assembled from multiple sources. The episode has a story arc, not a 
 
     gr.Markdown(
         "<p style='text-align:center;color:#9ca3af;font-size:0.85em;margin-top:24px;'>"
-        "AI201 · CodePath · Pod Classifier Lab</p>"
+        "Pod Classifier</p>"
     )
 
 if __name__ == "__main__":
