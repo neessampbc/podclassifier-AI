@@ -25,6 +25,26 @@ EXAMPLES = [
     ],
 ]
 
+# Challenge 4: adversarial examples designed to confuse the classifier
+ADVERSARIAL_EXAMPLES = [
+    [
+        "🎭 Adversarial #1 — Looks like interview, actually solo",
+        "Marcus answers the question I've been asking myself for years: what does it mean to build something that outlasts you? I spent three hours with his writing — the letters, the journals, the unfinished manuscript — and this episode is my attempt to answer that question through his words. He never agreed to this interview. He died in 2019. I'm the only voice you'll hear.",
+    ],
+    [
+        "🎭 Adversarial #2 — Looks like panel, actually narrative",
+        "Four voices. Four decades. Four versions of the same block in Detroit. We found recordings — a city council meeting from 1987, a neighborhood association tape from 1994, a radio call-in show from 2003, a voicemail saved on a flip phone from 2011. Nobody in this episode knew the others existed. This is a story assembled from what they left behind.",
+    ],
+    [
+        "🎭 Adversarial #3 — Looks like narrative, actually solo",
+        "The story begins in 1987. A young woman boards a bus in Guadalajara with forty dollars and no plan. That woman was my mother. I've been carrying this story for thirty years, and this episode is me finally telling it — from memory, from what she told me, from the version of events I've constructed entirely in my own head. No archives. No other interviews. Just what I remember and what I imagine.",
+    ],
+    [
+        "🎭 Adversarial #4 — Genuine edge case: solo or narrative?",
+        "I kept a journal for the entire year my father was sick. Every day, sometimes twice. This episode reads from those entries — unedited, in order — and occasionally stops to reflect on what I was getting wrong at the time. The journal is the only source. The voice is mine throughout. But the story is his.",
+    ],
+]
+
 LABEL_COLORS = {
     "interview": "#6366f1",   # indigo
     "solo":      "#8b5cf6",   # violet
@@ -55,9 +75,16 @@ def _label_badge(label: str) -> str:
     )
 
 
-def _result_html(label: str, reasoning: str) -> str:
+def _result_html(label: str, reasoning: str, confidence: int | None = None) -> str:
     desc = LABEL_DESCRIPTIONS.get(label, "Label not recognized.")
     badge = _label_badge(label)
+    conf_html = ""
+    if confidence is not None:
+        filled = "█" * confidence + "░" * (10 - confidence)
+        conf_html = (
+            f'<p style="margin:8px 0 0 0;color:#6b7280;font-size:0.9em;">'
+            f'Confidence: <code>{filled}</code> {confidence}/10</p>'
+        )
     return f"""
 <div style="font-family:sans-serif;padding:16px 0;">
   <div style="margin-bottom:12px;">{badge}</div>
@@ -65,6 +92,7 @@ def _result_html(label: str, reasoning: str) -> str:
   <div style="background:#f8f7ff;border-left:4px solid #8b5cf6;padding:12px 16px;border-radius:0 8px 8px 0;">
     <strong style="color:#4c1d95;">Reasoning:</strong>
     <p style="margin:6px 0 0 0;color:#374151;">{reasoning}</p>
+    {conf_html}
   </div>
 </div>
 """
@@ -90,14 +118,14 @@ def classify_description(description: str) -> str:
         )
 
     result = classify_episode(description, labeled_examples)
-    return _result_html(result["label"], result["reasoning"])
+    return _result_html(result["label"], result["reasoning"], result.get("confidence"))
 
 
 def fill_example(title: str, description: str) -> tuple[str, str]:
     return title, description
 
 
-def run_eval() -> str:
+def run_eval(max_per_class_val: int, use_all: bool, example_order: str) -> str:
     labeled_examples = load_labeled_examples()
     if not labeled_examples:
         return (
@@ -105,8 +133,17 @@ def run_eval() -> str:
             "Complete Milestone 1 first: open data/my_labels.json and add labels "
             "for the training episodes."
         )
-    print("\n--- Running evaluation ---")
-    eval_results = run_evaluation()
+    max_per_class = None if use_all else int(max_per_class_val)
+    config_note = []
+    if max_per_class is not None:
+        config_note.append(f"max {max_per_class} examples/class")
+    if example_order != "original":
+        config_note.append(f"order: {example_order}")
+    if config_note:
+        print(f"\n--- Running evaluation ({', '.join(config_note)}) ---")
+    else:
+        print("\n--- Running evaluation ---")
+    eval_results = run_evaluation(max_per_class=max_per_class, example_order=example_order)
     report = format_evaluation_report(eval_results)
     print("--- Evaluation complete ---\n")
     return report
@@ -185,6 +222,21 @@ Before the classifier works, you need to complete the milestones:
                         outputs=[title_box, description_box],
                     )
 
+            gr.Markdown("#### 🎭 Adversarial examples — Challenge 4")
+            gr.Markdown(
+                "_These descriptions are designed to fool the classifier. "
+                "Can it get them right? Hover over each title to see what makes it tricky._"
+            )
+            with gr.Row():
+                for title, desc in ADVERSARIAL_EXAMPLES:
+                    short = title[:42] + "…" if len(title) > 42 else title
+                    btn = gr.Button(short, size="sm", variant="secondary")
+                    btn.click(
+                        fn=fill_example,
+                        inputs=[gr.State(title), gr.State(desc)],
+                        outputs=[title_box, description_box],
+                    )
+
             classify_btn.click(
                 fn=classify_description,
                 inputs=[description_box],
@@ -204,6 +256,25 @@ and see overall and per-class accuracy.
 > Watch your terminal to see each classification as it happens.
                 """
             )
+
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("**Challenge 1 — Breaking point**")
+                    use_all = gr.Checkbox(value=True, label="Use all examples (default)")
+                    max_per_class_slider = gr.Slider(
+                        minimum=1, maximum=5, step=1, value=3,
+                        label="Max examples per class (active when unchecked above)",
+                        info="Simulate a smaller training set — watch which class degrades first",
+                    )
+                with gr.Column():
+                    gr.Markdown("**Challenge 2 — Prompt order**")
+                    example_order_dropdown = gr.Dropdown(
+                        choices=["original", "random", "reversed", "interleaved"],
+                        value="original",
+                        label="Example ordering",
+                        info="interleaved = alternates one per class; random = shuffled each run",
+                    )
+
             eval_btn = gr.Button("Run Evaluation", elem_id="eval-btn")
             eval_output = gr.Markdown(
                 value="_Click **Run Evaluation** to see results._"
@@ -211,7 +282,7 @@ and see overall and per-class accuracy.
 
             eval_btn.click(
                 fn=run_eval,
-                inputs=[],
+                inputs=[max_per_class_slider, use_all, example_order_dropdown],
                 outputs=[eval_output],
             )
 
