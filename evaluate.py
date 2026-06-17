@@ -4,17 +4,16 @@ from config import VALID_LABELS, DATA_PATH, TEST_FILE
 from classifier import classify_episode, load_labeled_examples
 
 
-def run_evaluation() -> dict:
+def run_evaluation(
+    max_per_class: int | None = None,
+    example_order: str = "original",
+) -> dict:
     """
     Run the classifier against the held-out test set and return full results.
 
-    This function is already complete. It:
-      1. Loads the labeled training examples (from your my_labels.json)
-      2. Loads the test episodes (with ground-truth labels)
-      3. Runs classify_episode() on each test description
-      4. Returns a results dict with predictions, ground truth, and per-episode detail
-
-    You'll use the results dict in compute_accuracy() and compute_per_class_accuracy().
+    Args:
+        max_per_class: Limit examples per class shown to the LLM (Challenge 1).
+        example_order: Order of examples in the prompt (Challenge 2).
     """
     labeled_examples = load_labeled_examples()
 
@@ -25,7 +24,12 @@ def run_evaluation() -> dict:
     results = []
     for episode in test_episodes:
         print(f"  Classifying: {episode['title'][:60]}...")
-        prediction = classify_episode(episode["description"], labeled_examples)
+        prediction = classify_episode(
+            episode["description"],
+            labeled_examples,
+            max_per_class=max_per_class,
+            example_order=example_order,
+        )
         results.append({
             "id": episode["id"],
             "title": episode["title"],
@@ -33,6 +37,7 @@ def run_evaluation() -> dict:
             "ground_truth": episode["label"],
             "predicted": prediction["label"],
             "reasoning": prediction["reasoning"],
+            "confidence": prediction.get("confidence"),
             "correct": prediction["label"] == episode["label"],
         })
 
@@ -51,14 +56,13 @@ def compute_accuracy(predictions: list[str], ground_truth: list[str]) -> float:
     """
     Compute overall classification accuracy.
 
-    TODO — Milestone 3:
-
     Accuracy = number of correct predictions / total predictions.
     A prediction is correct when it exactly matches the ground truth label.
-
-    Before writing code, complete specs/evaluation-spec.md.
     """
-    return 0.0
+    if not ground_truth:
+        return 0.0
+    correct = sum(p == t for p, t in zip(predictions, ground_truth))
+    return correct / len(ground_truth)
 
 
 def compute_per_class_accuracy(
@@ -67,30 +71,34 @@ def compute_per_class_accuracy(
     """
     Compute accuracy broken down by each label class.
 
-    TODO — Milestone 3 (complete after compute_accuracy):
-
     For each label in VALID_LABELS, compute:
       - "correct"  : number of episodes with this ground-truth label predicted correctly
       - "total"    : number of episodes with this ground-truth label
       - "accuracy" : correct / total (0.0 if total is 0)
-
-    Return a dict keyed by label. Example:
-      {
-        "interview": {"correct": 4, "total": 5, "accuracy": 0.8},
-        "solo":      {"correct": 5, "total": 5, "accuracy": 1.0},
-        ...
-      }
-
-    Before writing code, complete specs/evaluation-spec.md.
     """
-    return {label: {"correct": 0, "total": 0, "accuracy": 0.0} for label in VALID_LABELS}
+    counts = {label: {"correct": 0, "total": 0} for label in VALID_LABELS}
+
+    for predicted, truth in zip(predictions, ground_truth):
+        if truth in counts:
+            counts[truth]["total"] += 1
+            if predicted == truth:
+                counts[truth]["correct"] += 1
+
+    return {
+        label: {
+            **counts[label],
+            "accuracy": counts[label]["correct"] / counts[label]["total"]
+            if counts[label]["total"] > 0
+            else 0.0,
+        }
+        for label in VALID_LABELS
+    }
 
 
 def format_evaluation_report(eval_results: dict) -> str:
     """
     Format evaluation results into a readable report string.
-
-    This function is already complete. Pass it the dict returned by run_evaluation().
+    Includes per-class accuracy, confidence scores, and misclassification list.
     """
     predictions = eval_results["predictions"]
     ground_truth = eval_results["ground_truth"]
@@ -108,11 +116,31 @@ def format_evaluation_report(eval_results: dict) -> str:
         bar = "█" * int(stats["accuracy"] * 10) + "░" * (10 - int(stats["accuracy"] * 10))
         lines.append(f"  {label:<12} {bar}  {stats['accuracy']:.0%}  ({stats['correct']}/{stats['total']})")
 
+    # --- Challenge 3: average confidence per class ---
+    conf_by_class: dict[str, list[int]] = {label: [] for label in VALID_LABELS}
+    for r in results:
+        if r["confidence"] is not None and r["ground_truth"] in conf_by_class:
+            conf_by_class[r["ground_truth"]].append(r["confidence"])
+
+    if any(conf_by_class.values()):
+        lines.append("\n**Average confidence per class (0–10):**")
+        for label in VALID_LABELS:
+            confs = conf_by_class[label]
+            if confs:
+                avg = sum(confs) / len(confs)
+                correct_confs = [r["confidence"] for r in results if r["ground_truth"] == label and r["correct"] and r["confidence"] is not None]
+                wrong_confs = [r["confidence"] for r in results if r["ground_truth"] == label and not r["correct"] and r["confidence"] is not None]
+                detail = ""
+                if correct_confs and wrong_confs:
+                    detail = f"  ✓ avg {sum(correct_confs)/len(correct_confs):.1f}  ✗ avg {sum(wrong_confs)/len(wrong_confs):.1f}"
+                lines.append(f"  {label:<12} {avg:.1f}/10{detail}")
+
     misclassified = [r for r in results if not r["correct"]]
     if misclassified:
         lines.append(f"\n**Misclassified ({len(misclassified)}):**")
         for r in misclassified:
-            lines.append(f"  [{r['ground_truth']} → {r['predicted']}] {r['title']}")
+            conf_str = f"  (confidence: {r['confidence']}/10)" if r["confidence"] is not None else ""
+            lines.append(f"  [{r['ground_truth']} → {r['predicted']}] {r['title']}{conf_str}")
     else:
         lines.append("\n**No misclassifications — perfect score!**")
 

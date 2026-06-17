@@ -91,10 +91,19 @@ the format below:" followed by the output format you chose.
 **What output format should you request from the LLM?**
 
 ```
-[blank — you need to parse the response in classify_episode(). What format
-makes parsing reliable? Think about: a single label on its own line?
-A structured format like "Label: X / Reasoning: Y"? JSON?
-What are the tradeoffs?]
+We use a labeled key-value format:
+
+LABEL: <label>
+REASONING: <one sentence>
+
+Tradeoffs considered:
+- JSON is reliable for structured parsing but LLMs sometimes wrap it in markdown
+  code fences, requiring extra stripping logic.
+- A bare label on its own line is simple but gives no way to extract reasoning
+  without additional lines that the model might format inconsistently.
+- "LABEL:" / "REASONING:" prefixes are easy to parse with startswith(), handle
+  capitalization variants via .upper(), and are unlikely to appear in episode
+  descriptions themselves. This was our chosen approach.
 ```
 
 ---
@@ -102,8 +111,13 @@ What are the tradeoffs?]
 **Edge cases to handle in the prompt:**
 
 ```
-[blank — what if labeled_examples is empty? What if the description is very
-short? How does your prompt handle these?]
+- If labeled_examples is empty: the examples block will be blank, and the LLM
+  will still receive the task instruction and label definitions — it will attempt
+  zero-shot classification. This degrades quality but doesn't crash.
+- If the description is very short: no special handling needed; the prompt format
+  still works, and the model will classify based on whatever signal is present.
+- Unparseable response: handled in classify_episode() — if no LABEL: line is
+  found or the extracted label isn't in VALID_LABELS, label defaults to "unknown".
 ```
 
 ---
@@ -159,9 +173,12 @@ Extract the response text from:
 **Step 3 — Parse the response:**
 
 ```
-[blank — how do you extract the label and reasoning from the LLM's text output?
-What string operations or parsing logic do you need?
-This depends on the output format you chose in build_few_shot_prompt.]
+Split the response text line by line. For each line:
+- If it starts with "LABEL:" (case-insensitive via .upper()), extract everything
+  after the colon, strip whitespace, convert to lowercase, and strip punctuation
+  characters ("*", "_", ".", " "). Check against VALID_LABELS.
+- If it starts with "REASONING:" (case-insensitive), extract everything after
+  the colon and strip whitespace. Use as the reasoning string.
 ```
 
 ---
@@ -169,8 +186,9 @@ This depends on the output format you chose in build_few_shot_prompt.]
 **Step 4 — Validate the label:**
 
 ```
-[blank — what do you do if the LLM returns a label that isn't in VALID_LABELS?
-What should label be set to?]
+After parsing, check if the extracted label is in VALID_LABELS. If it is not
+(including if no LABEL: line was found at all), set label = "unknown".
+The reasoning string is kept regardless — it helps diagnose why parsing failed.
 ```
 
 ---
@@ -178,9 +196,10 @@ What should label be set to?]
 **Step 5 — Handle errors gracefully:**
 
 ```
-[blank — what could go wrong? (Network error? Unparseable response?)
-What should the function return if something fails?
-Hint: the evaluation loop runs 20 calls — one bad response shouldn't crash everything.]
+Wrap the entire function body in a try/except Exception block. If anything
+fails (network error, API error, AttributeError on the response object, etc.),
+return {"label": "unknown", "reasoning": f"Error during classification: {e}"}.
+This ensures the evaluation loop (20 calls) can complete even if one call fails.
 ```
 
 ---

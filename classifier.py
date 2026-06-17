@@ -1,5 +1,7 @@
 import json
 import os
+import random
+from collections import defaultdict
 from groq import Groq
 from config import GROQ_API_KEY, LLM_MODEL, VALID_LABELS, DATA_PATH, TRAIN_FILE, LABELS_FILE
 
@@ -38,45 +40,119 @@ def load_labeled_examples() -> list[dict]:
     return labeled
 
 
-def build_few_shot_prompt(labeled_examples: list[dict], description: str) -> str:
+def build_few_shot_prompt(
+    labeled_examples: list[dict],
+    description: str,
+    max_per_class: int | None = None,
+    example_order: str = "original",
+) -> str:
     """
     Build a few-shot classification prompt using the student's labeled training examples.
 
-    TODO — Milestone 2:
-
-    Your prompt needs to:
-      1. Describe the task and the four valid labels
-      2. Show the labeled training examples so the LLM can learn the pattern
-      3. Present the new description and ask for a classification
-
-    The LLM should return a single label from VALID_LABELS (exactly as written)
-    plus a brief explanation of its reasoning. Think carefully about the output
-    format you request — you'll need to parse it in classify_episode().
-
-    Before writing code, complete specs/classifier-spec.md.
+    Args:
+        labeled_examples: All labeled training episodes.
+        description: The episode description to classify.
+        max_per_class: If set, limits how many examples per class are shown (Challenge 1).
+        example_order: How to order examples — "original", "random", "reversed",
+                       or "interleaved" (alternates one per class) (Challenge 2).
     """
-    return ""
+    # --- Challenge 1: limit examples per class ---
+    if max_per_class is not None:
+        per_class: dict[str, list] = defaultdict(list)
+        for ex in labeled_examples:
+            per_class[ex["label"]].append(ex)
+        labeled_examples = []
+        for label in VALID_LABELS:
+            labeled_examples.extend(per_class[label][:max_per_class])
+
+    # --- Challenge 2: reorder examples ---
+    if example_order == "random":
+        labeled_examples = random.sample(labeled_examples, len(labeled_examples))
+    elif example_order == "reversed":
+        labeled_examples = list(reversed(labeled_examples))
+    elif example_order == "interleaved":
+        per_class = defaultdict(list)
+        for ex in labeled_examples:
+            per_class[ex["label"]].append(ex)
+        interleaved = []
+        max_len = max((len(v) for v in per_class.values()), default=0)
+        for i in range(max_len):
+            for label in VALID_LABELS:
+                if i < len(per_class[label]):
+                    interleaved.append(per_class[label][i])
+        labeled_examples = interleaved
+
+    task_instruction = """You are classifying podcast episodes by their structural format.
+Classify the episode into exactly one of these four labels:
+
+- interview: a host speaks with one or more guests; the episode is structured around questions and responses
+- solo: a single host speaking from memory, experience, or opinion — no guests, no assembled external sources
+- panel: three or more speakers discussing a topic as rough equals — no clear host/guest dynamic
+- narrative: a story assembled from external sources (interviews, archives, recordings, documents) with a clear story arc
+
+You will be shown labeled examples first, then asked to classify a new episode.
+Respond using this exact format:
+LABEL: <one of: interview, solo, panel, narrative>
+CONFIDENCE: <integer 0-10, where 10 is completely certain>
+REASONING: <one sentence explaining why>"""
+
+    examples_block = ""
+    for ex in labeled_examples:
+        examples_block += f"\n---\nTitle: {ex['title']}\nDescription: {ex['description']}\nLabel: {ex['label']}\n"
+
+    new_episode = (
+        f"\n---\nTitle: (unknown)\nDescription: {description}\nLabel: ?\n\n"
+        f"Classify the episode above using the format:\n"
+        f"LABEL: <label>\nCONFIDENCE: <0-10>\nREASONING: <one sentence>"
+    )
+
+    return f"{task_instruction}\n\n## Labeled Examples\n{examples_block}\n## New Episode to Classify\n{new_episode}"
 
 
-def classify_episode(description: str, labeled_examples: list[dict]) -> dict:
+def classify_episode(
+    description: str,
+    labeled_examples: list[dict],
+    max_per_class: int | None = None,
+    example_order: str = "original",
+) -> dict:
     """
     Classify a single podcast episode description using the few-shot LLM classifier.
 
-    TODO — Milestone 2 (complete after build_few_shot_prompt):
-
-    Steps:
-      1. Call build_few_shot_prompt() to construct the prompt
-      2. Send it to the LLM via _client.chat.completions.create()
-      3. Parse the response to extract a label and reasoning
-      4. Validate the label — if it's not in VALID_LABELS, set it to "unknown"
-      5. Return a dict with "label" and "reasoning" keys
-
-    Handle the case where the LLM returns something unparseable gracefully —
-    don't let a bad response crash the whole evaluation.
-
-    Before writing code, complete specs/classifier-spec.md.
+    Returns a dict with "label", "reasoning", and "confidence" (0-10) keys.
     """
-    return {
-        "label": None,
-        "reasoning": "Classifier not yet implemented. Complete Milestone 2.",
-    }
+    try:
+        prompt = build_few_shot_prompt(
+            labeled_examples, description, max_per_class=max_per_class, example_order=example_order
+        )
+
+        response = _client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=250,
+        )
+        response_text = response.choices[0].message.content or ""
+
+        label = "unknown"
+        reasoning = response_text.strip()
+        confidence: int | None = None
+
+        for line in response_text.splitlines():
+            stripped = line.strip()
+            upper = stripped.upper()
+            if upper.startswith("LABEL:"):
+                raw_label = stripped[6:].strip().lower().strip("*_. ")
+                if raw_label in VALID_LABELS:
+                    label = raw_label
+            elif upper.startswith("CONFIDENCE:"):
+                raw_conf = stripped[11:].strip().strip("*_. ")
+                try:
+                    confidence = max(0, min(10, int(raw_conf)))
+                except ValueError:
+                    pass
+            elif upper.startswith("REASONING:"):
+                reasoning = stripped[10:].strip()
+
+        return {"label": label, "reasoning": reasoning, "confidence": confidence}
+
+    except Exception as e:
+        return {"label": "unknown", "reasoning": f"Error during classification: {e}", "confidence": None}
