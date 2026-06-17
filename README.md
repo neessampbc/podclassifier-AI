@@ -1,4 +1,4 @@
-# AI201 Lab 3 — Pod Classifier
+# Pod Classifier
 
 A few-shot podcast episode classifier. Given an episode description, classifies it
 as `interview`, `solo`, `panel`, or `narrative` using labeled examples and an LLM.
